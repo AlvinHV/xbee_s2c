@@ -20,7 +20,7 @@ use arraydeque::ArrayDeque;
 use arrayvec::{Array, ArrayVec};
 use embedded_hal::blocking::delay::DelayMs;
 use embedded_hal::blocking::serial::Write as BlockingWrite;
-use embedded_hal::digital::{InputPin, OutputPin};
+use embedded_hal::digital::v2::{InputPin, OutputPin};
 use embedded_hal::serial::{Read, Write};
 use embedded_hal::spi::FullDuplex;
 
@@ -128,7 +128,7 @@ where
             match self.serial.read() {
                 Ok(b'O') => break,
                 Ok(_) => panic!("Got other character while waiting for OK"), // TODO: error
-                Err(nb::Error::WouldBlock) => {} // keep blocking
+                Err(nb::Error::WouldBlock) => {}                             // keep blocking
                 Err(_) => panic!("Some error while waiting for OK"), // return Err(e.into()),
             }
         }
@@ -136,7 +136,7 @@ where
             match self.serial.read() {
                 Ok(b'K') => break,
                 Ok(_) => panic!("Got other character while waiting for OK"), // TODO: error
-                Err(nb::Error::WouldBlock) => {} // keep blocking
+                Err(nb::Error::WouldBlock) => {}                             // keep blocking
                 Err(_) => panic!("Some error while waiting for OK"), // return Err(e.into()),
             }
         }
@@ -224,8 +224,9 @@ where
     pub fn tx_rx_internal(&mut self) -> Result<bool, E> {
         let mut val_read = false;
         let mut attn_val;
+        let mut start_flag = false;
         while {
-            attn_val = self.attn.is_high();
+            attn_val = self.attn.is_low().ok().unwrap();
             !self.tx_queue.is_empty() || !attn_val
         } {
             let tx = if !self.tx_queue.is_empty() {
@@ -236,11 +237,17 @@ where
             };
 
             // TODO: better error handling?
-            block!(self.serial.send(tx))?;
+            self.serial.send(tx).ok();
 
-            let rx = block!(self.serial.read())?;
+            let rx = self.serial.read().ok().unwrap();
             if !attn_val {
                 // TODO: don't unwrap, pass up error
+                if start_flag == false {
+                    if rx != 0x7E {
+                        continue;
+                    }
+                    start_flag = true;
+                }
                 self.rx_queue.try_push(rx).unwrap();
                 val_read = true;
                 if self.rx_queue.is_full() {
